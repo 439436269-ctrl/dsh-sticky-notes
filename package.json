@@ -1,7 +1,7 @@
 {
   "name": "@vfvrpq/dsh-sticky-notes",
-  "version": "0.1.0",
-  "description": "Sticky notes in the Harness sidebar: a dedicated notes panel with auto-save, plus note_list / note_create / note_update / note_delete tools so the assistant can jot things down for you.",
+  "version": "0.2.0",
+  "description": "Colour-coded sticky notes on the Harness sidebar: a tiled board with per-row density, pin, search, colour filters, a trash with restore, Markdown export, and note_* tools that read and write the same notes.",
   "type": "module",
   "license": "MIT",
   "author": "439436269-ctrl",

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFile } from "node:fs/promises";
 import { ROUTE_PATH } from "../lib/config.js";
+import { COLOR_IDS } from "../lib/palette.js";
 
 /**
  * Load the browser bundle the way the web shell does: register a factory, then
@@ -28,6 +29,7 @@ async function loadBundle() {
         createElement: () => null,
         useState: () => [undefined, () => {}],
         useEffect: () => {},
+        useMemo: (factory) => factory(),
         useRef: () => ({ current: null }),
         useCallback: (fn) => fn
       };
@@ -35,6 +37,21 @@ async function loadBundle() {
     throw new Error(`unexpected module request ${specifier}`);
   });
   return exports;
+}
+
+/** A note fixture. */
+function note(overrides = {}) {
+  return {
+    id: "n1",
+    title: "t",
+    body: "",
+    color: "plain",
+    pinned: false,
+    createdAt: 1,
+    updatedAt: 1,
+    archivedAt: null,
+    ...overrides
+  };
 }
 
 /** A client context that records slot registrations and dictionaries. */
@@ -76,6 +93,16 @@ test("the bundle registers itself under the package name and requires only react
   assert.equal(exports.DEFAULT_ROUTE_PATH, ROUTE_PATH, "the bundle mirrors the host route path");
 });
 
+test("the shared palette matches the host and every swatch has an accent", async () => {
+  const exports = await loadBundle();
+  assert.deepEqual(exports.COLORS, [...COLOR_IDS]);
+  for (const color of exports.COLORS) {
+    assert.equal(typeof exports.accents[color], "string", `${color} needs an accent`);
+  }
+  assert.deepEqual(exports.DENSITIES, ["auto", "2", "3", "4", "5"]);
+  assert.deepEqual(exports.SORTS, ["updated", "created", "title"]);
+});
+
 test("the route path comes from the injected boot config with a shipped default", async () => {
   const exports = await loadBundle();
   delete globalThis.__DSH_STICKY_NOTES_CONFIG__;
@@ -90,19 +117,28 @@ test("the route path comes from the injected boot config with a shipped default"
 test("previewOf collapses whitespace and shortens long bodies", async () => {
   const exports = await loadBundle();
   assert.equal(exports.previewOf("  a\n\n b  "), "a b");
-  const long = "x".repeat(200);
-  assert.equal(exports.previewOf(long).length, 97, "96 characters plus the ellipsis");
+  const long = "x".repeat(300);
+  assert.equal(exports.previewOf(long).length, 181, "180 characters plus the ellipsis");
   assert.ok(exports.previewOf(long).endsWith("…"));
 });
 
-test("matchesNote searches title and body case-insensitively", async () => {
+test("filterNotes and sortNotes match the host rules", async () => {
   const exports = await loadBundle();
-  const note = { title: "Shopping", body: "milk and eggs" };
-  assert.equal(exports.matchesNote(note, ""), true);
-  assert.equal(exports.matchesNote(note, "  "), true);
-  assert.equal(exports.matchesNote(note, "MILK"), true);
-  assert.equal(exports.matchesNote(note, "shop"), true);
-  assert.equal(exports.matchesNote(note, "bread"), false);
+  const notes = [
+    note({ id: "a", title: "milk", color: "mint", updatedAt: 3, createdAt: 3 }),
+    note({ id: "b", title: "eggs", color: "rose", pinned: true, updatedAt: 1, createdAt: 1 }),
+    note({ id: "c", title: "old", color: "mint", archivedAt: 9, updatedAt: 0, createdAt: 4 }),
+    note({ id: "d", title: "milk note", color: "rose", updatedAt: 2, createdAt: 2 })
+  ];
+  assert.deepEqual(exports.filterNotes(notes, { view: "all" }).map((entry) => entry.id), ["a", "b", "d"]);
+  assert.deepEqual(exports.filterNotes(notes, { view: "trash" }).map((entry) => entry.id), ["c"]);
+  assert.deepEqual(exports.filterNotes(notes, { view: "pinned" }).map((entry) => entry.id), ["b"]);
+  assert.deepEqual(exports.filterNotes(notes, { color: "mint" }).map((entry) => entry.id), ["a"]);
+  assert.deepEqual(exports.filterNotes(notes, { query: "milk" }).map((entry) => entry.id), ["a", "d"]);
+
+  assert.deepEqual(exports.sortNotes(notes, "updated").map((entry) => entry.id), ["b", "a", "d", "c"]);
+  assert.deepEqual(exports.sortNotes(notes, "created").map((entry) => entry.id), ["b", "c", "a", "d"]);
+  assert.deepEqual(exports.countsOf(notes), { all: 3, pinned: 1, trash: 1 });
 });
 
 test("formatRelative labels recent and older timestamps", async () => {
@@ -116,7 +152,7 @@ test("formatRelative labels recent and older timestamps", async () => {
   assert.equal(exports.formatRelative(undefined, t), "");
 });
 
-test("apply registers the main panel and the sidebar entry under one id", async () => {
+test("apply registers the main board and the sidebar entry under one id", async () => {
   const exports = await loadBundle();
   globalThis.__DSH_STICKY_NOTES_CONFIG__ = { routePath: "/api/custom-notes" };
   const { ctx, slots, dictionaries, effects } = fakeClientContext();
@@ -127,12 +163,13 @@ test("apply registers the main panel and the sidebar entry under one id", async 
   assert.equal(dictionaries[0].namespace, "stickyNotes");
   assert.equal(typeof dictionaries[0].value.zh.panelTitle, "string");
   assert.equal(typeof dictionaries[0].value.en.panelTitle, "string");
+  assert.equal(typeof dictionaries[0].value.zh.colorMint, "string");
   assert.notEqual(dictionaries[0].value.zh.panelTitle, dictionaries[0].value.en.panelTitle);
 
   assert.equal(slots.length, 2);
   const main = slots.find((slot) => slot.name === "main");
   const entry = slots.find((slot) => slot.name === "sidebar.panellist");
-  assert.ok(main !== undefined, "the main panel is registered");
+  assert.ok(main !== undefined, "the main board is registered");
   assert.ok(entry !== undefined, "the sidebar entry is registered");
   assert.equal(main.key, entry.id, "the sidebar id addresses exactly this panel");
   assert.equal(entry.id, exports.PANEL_ID);

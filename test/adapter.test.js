@@ -118,6 +118,16 @@ function fakeContext() {
   return { ctx, domain, route, tools, effects, handlers };
 }
 
+/** Run one action over the mounted route and return the parsed body. */
+async function call(route, payload) {
+  const init =
+    payload === null
+      ? undefined
+      : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) };
+  const response = await route.current.fetch(new Request("http://x" + ROUTE_PATH, init));
+  return { status: response.status, body: await response.json() };
+}
+
 test("the host entry exposes name, inject and apply", async () => {
   const { module, root } = await mountHostEntry();
   try {
@@ -148,6 +158,13 @@ test("apply registers the route, four tools, and publishes the path to the page"
       assert.equal(typeof tool.description, "string");
       assert.equal(tool.output.schema.properties.text.type, "string");
     }
+    const createParams = tools[0].parameters;
+    assert.ok(Array.isArray(createParams.color.enum) && createParams.color.enum.includes("amber"));
+    assert.equal(createParams.pinned.type, "boolean");
+    const listParams = tools[1].parameters;
+    assert.equal(listParams.includeArchived.type, "boolean");
+    assert.equal(tools[3].parameters.permanent.type, "boolean");
+
     assert.ok(effects.some((entry) => entry.label === "sticky-notes: notes route"));
     assert.ok(effects.some((entry) => entry.label === "sticky-notes: storage domain"));
 
@@ -162,48 +179,79 @@ test("apply registers the route, four tools, and publishes the path to the page"
   }
 });
 
-test("the tools and the route share one store end to end", async () => {
+test("colours, pins, the trash and the tools agree end to end", async () => {
   const { module, root } = await mountHostEntry();
   try {
     const { ctx, domain, route, tools } = fakeContext();
     module.apply(ctx);
     const byName = Object.fromEntries(tools.map((tool) => [tool.name, tool]));
 
-    const created = await byName.note_create.execute({ body: "买牛奶\n再买鸡蛋" });
+    const created = await byName.note_create.execute({ body: "买牛奶\n再买鸡蛋", color: "mint", pinned: true });
     assert.match(created.text, /Created sticky note note-/);
+    assert.match(created.text, /colour=mint pinned=true/);
 
-    // The HTTP route the panel uses sees the note the tool created.
-    const listed = await route.current.fetch(new Request("http://x" + ROUTE_PATH));
+    // The HTTP route the board uses sees colour and pin.
+    const listed = await call(route, null);
     assert.equal(listed.status, 200);
-    const body = await listed.json();
-    assert.equal(body.notes.length, 1);
-    assert.equal(body.notes[0].title, "买牛奶");
-    const id = body.notes[0].id;
+    assert.equal(listed.body.notes.length, 1);
+    assert.equal(listed.body.notes[0].title, "买牛奶");
+    assert.equal(listed.body.notes[0].color, "mint");
+    assert.equal(listed.body.notes[0].pinned, true);
+    const id = listed.body.notes[0].id;
 
-    // A panel-style POST updates it, and note_list reads the new value back.
-    const updated = await route.current.fetch(
-      new Request("http://x" + ROUTE_PATH, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "update", id, title: "购物清单", body: "牛奶 + 鸡蛋" })
-      })
-    );
+    // Board-style patch: rename and recolour.
+    const updated = await call(route, { action: "update", id, title: "购物清单", body: "牛奶 + 鸡蛋", color: "rose" });
     assert.equal(updated.status, 200);
-    assert.equal((await updated.json()).note.title, "购物清单");
+    assert.equal(updated.body.note.title, "购物清单");
+    assert.equal(updated.body.note.color, "rose");
 
-    const listText = (await byName.note_list.execute({})).text;
-    assert.match(listText, /1 sticky note/);
-    assert.match(listText, /购物清单/);
+    // Tools filter like the board.
+    assert.match((await byName.note_list.execute({ query: "鸡蛋" })).text, /1 sticky note/);
+    assert.match((await byName.note_list.execute({ query: "面包" })).text, /no matching/);
+    assert.match((await byName.note_list.execute({ color: "rose" })).text, /1 sticky note/);
+    assert.match((await byName.note_list.execute({ color: "sky" })).text, /no matching/);
+    assert.match((await byName.note_list.execute({ pinned: true })).text, /1 sticky note/);
 
-    const filtered = await byName.note_list.execute({ query: "鸡蛋" });
-    assert.match(filtered.text, /1 sticky note/);
-    const none = await byName.note_list.execute({ query: "面包" });
-    assert.match(none.text, /No sticky note matches/);
-
+    // Delete is a soft delete; the board still receives the trashed row.
     const deleted = await byName.note_delete.execute({ id });
-    assert.match(deleted.text, /Deleted sticky note/);
-    assert.match((await byName.note_list.execute({})).text, /no sticky notes yet/i);
+    assert.match(deleted.text, /moved sticky note .* to the trash/i);
+    assert.match((await byName.note_list.execute({})).text, /no matching active sticky notes/);
+    assert.match((await byName.note_list.execute({ includeArchived: true })).text, /trash/);
+    const trashed = await call(route, null);
+    assert.equal(trashed.body.notes[0].archivedAt > 0, true);
+
+    // Restore through the tool, then purge for good.
+    const restored = await byName.note_update.execute({ id, archived: false, pinned: false });
+    assert.match(restored.text, /archived=false/);
+    assert.match((await byName.note_list.execute({})).text, /1 sticky note/);
+
+    const purged = await byName.note_delete.execute({ id, permanent: true });
+    assert.match(purged.text, /Permanently deleted/);
+    assert.match((await byName.note_list.execute({})).text, /no matching active sticky notes/);
     assert.equal(domain.closed, 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("the board can duplicate a note and empty the trash", async () => {
+  const { module, root } = await mountHostEntry();
+  try {
+    const { ctx, route } = fakeContext();
+    module.apply(ctx);
+
+    const first = await call(route, { action: "create", title: "原文", body: "内容", color: "sky" });
+    const id = first.body.note.id;
+    const copy = await call(route, { action: "duplicate", id });
+    assert.equal(copy.status, 200);
+    assert.equal(copy.body.note.title, "原文 (copy)");
+    assert.equal(copy.body.note.color, "sky");
+
+    await call(route, { action: "archive", id });
+    assert.equal((await call(route, null)).body.notes.filter((entry) => entry.archivedAt !== null).length, 1);
+    const cleared = await call(route, { action: "clear-trash" });
+    assert.equal(cleared.body.removed, 1);
+    assert.equal((await call(route, null)).body.notes.length, 1, "only the copy survives");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -218,7 +266,7 @@ test("tool argument mistakes fail with an actionable message", async () => {
 
     await assert.rejects(() => byName.note_create.execute({ body: "   " }), /body must not be empty/);
     await assert.rejects(() => byName.note_update.execute({ id: "nope", title: "x" }), /no sticky note with id nope/);
-    await assert.rejects(() => byName.note_update.execute({ id: "x" }), /pass a title, a body, or both/);
+    await assert.rejects(() => byName.note_update.execute({ id: "x" }), /pass a title, body, colour/);
     await assert.rejects(() => byName.note_delete.execute({}), /id is required/);
   } finally {
     await rm(root, { recursive: true, force: true });

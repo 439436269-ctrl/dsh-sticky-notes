@@ -1,7 +1,8 @@
 /**
- * Headless end-to-end check for dsh-sticky-notes against a locally booted web
- * host: open the app, click the sidebar entry, create a note through the panel,
- * wait for the auto-save, reload, and prove the note survived.
+ * Headless end-to-end check for the sticky-notes board against a locally booted
+ * web host: create a coloured, pinned note through the UI, change the grid
+ * density, search, archive/restore through the trash, and prove everything
+ * survives a reload.
  *
  * Usage:
  *   node scripts/e2e-notes.mjs --base http://127.0.0.1:PORT --token <token>
@@ -43,10 +44,7 @@ const outDir = argument("out") ?? join(process.cwd(), "scripts", "shots");
 if (base === undefined) throw new Error("--base is required");
 await mkdir(outDir, { recursive: true });
 
-const browser = await chromium.launch({
-  headless: true,
-  channel: process.env.E2E_BROWSER_CHANNEL ?? "msedge"
-});
+const browser = await chromium.launch({ headless: true, channel: process.env.E2E_BROWSER_CHANNEL ?? "msedge" });
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 const page = await context.newPage();
 const errors = [];
@@ -55,21 +53,11 @@ page.on("console", (message) => {
   if (message.type() === "error") errors.push(`console: ${message.text()}`);
 });
 
-await page.goto(token === undefined ? base : `${base}/?token=${token}`, { waitUntil: "domcontentloaded" });
-await page.waitForTimeout(6000);
-
-/**
- * Clear the first-run overlays a fresh profile shows: the API-key prompt and
- * the sidebar hint. Both are plain buttons with visible labels.
- * @param target - the page.
- */
-async function dismissOverlays(target) {
+/** Clear the first-run overlays a fresh profile shows, without hitting masks. */
+async function dismissOverlays() {
   const labels = ["暂不开启", "稍后配置", "知道了", "保留当前显示", "跳过", "以后再说", "结束", "继续"];
   for (let round = 0; round < 8; round += 1) {
-    // A fresh profile can stack two dialogs (cost-meter hint above the API-key
-    // prompt), so the mask swallows pointer clicks: dispatch on the button
-    // itself instead of hitting coordinates.
-    const clicked = await target.evaluate((wanted) => {
+    const clicked = await page.evaluate((wanted) => {
       const candidates = Array.from(document.querySelectorAll('button, [role="button"]'));
       const match = candidates.find((element) => {
         const text = (element.innerText || "").replace(/\s+/g, "").trim();
@@ -80,124 +68,151 @@ async function dismissOverlays(target) {
       return (match.innerText || "").trim();
     }, labels);
     if (clicked === null) {
-      await target.keyboard.press("Escape").catch(() => {});
-      await target.waitForTimeout(300);
-      const remaining = await target.evaluate(
-        () => document.querySelectorAll('[role="dialog"], [aria-modal="true"]').length
-      );
+      await page.keyboard.press("Escape").catch(() => {});
+      await page.waitForTimeout(300);
+      const remaining = await page.evaluate(() => document.querySelectorAll('[role="dialog"], [role="dialog"][open]').length);
       if (remaining === 0) return;
       continue;
     }
     console.log(`dismissed: ${clicked}`);
-    await target.waitForTimeout(700);
+    await page.waitForTimeout(700);
   }
 }
 
-await dismissOverlays(page);
-
-// Catalogue the sidebar entries: the plugin's own button carries its label.
-const buttons = page.locator("button");
-const catalog = [];
-for (let index = 0; index < (await buttons.count()); index += 1) {
-  const button = buttons.nth(index);
-  const label = (await button.innerText().catch(() => "")).replace(/\s+/g, " ").trim();
-  const aria = (await button.getAttribute("aria-label").catch(() => "")) ?? "";
-  const title = (await button.getAttribute("title").catch(() => "")) ?? "";
-  const box = await button.boundingBox().catch(() => null);
-  if (box !== null) catalog.push({ index, label, aria, title, box });
+/** Open the notes board from the sidebar. */
+async function openBoard() {
+  await page.getByRole("button", { name: "便签", exact: true }).first().click({ timeout: 5000 });
+  await page.waitForTimeout(1200);
+  const count = await page.locator("[data-dsh-sticky-notes]").count();
+  if (count !== 1) throw new Error("the notes board did not mount");
 }
-await writeFile(join(outDir, "buttons.json"), JSON.stringify(catalog, null, 2), "utf8");
-await page.screenshot({ path: join(outDir, "01-home.png") });
 
-const entry = catalog.find((item) => /便签|Notes/i.test(item.aria) || /便签|Notes/.test(item.label) || /便签|Notes/i.test(item.title));
-if (entry === undefined) {
-  console.log(`sidebar entries: ${catalog.map((item) => `${item.index}:${item.aria || item.label || item.title}`).join(" | ")}`);
-  throw new Error("sticky-notes sidebar entry not found");
-}
-console.log(`entry: ${JSON.stringify(entry)}`);
+const checks = {};
+await page.goto(token === undefined ? base : `${base}/?token=${token}`, { waitUntil: "domcontentloaded" });
+await page.waitForTimeout(6000);
+await dismissOverlays();
+await openBoard();
+await dismissOverlays();
 
-await buttons.nth(entry.index).click({ timeout: 5000 });
-await page.waitForTimeout(1200);
-const panel = page.locator("[data-dsh-sticky-notes]");
-const panelCount = await panel.count();
-const panelBox = panelCount ? await panel.first().boundingBox() : null;
-const paint = panelCount
-  ? await panel.first().evaluate((element) => {
-      const style = getComputedStyle(element);
-      return {
-        background: style.backgroundColor,
-        color: style.color,
-        bgBase: getComputedStyle(document.documentElement).getPropertyValue("--dsw-alias-bg-base").trim(),
-        bgLayer1: getComputedStyle(document.documentElement).getPropertyValue("--dsw-alias-bg-layer-1").trim()
-      };
-    })
-  : null;
-await page.screenshot({ path: join(outDir, "02-panel.png") });
-console.log(`panel: count=${panelCount} box=${JSON.stringify(panelBox)} paint=${JSON.stringify(paint)}`);
+const board = page.locator("[data-dsh-sticky-notes]");
+await page.screenshot({ path: join(outDir, "10-board-empty.png") });
 
-if (panelCount !== 1) throw new Error("the notes panel did not mount");
+// 1. Create a coloured, pinned note through the UI.
+await page.getByRole("button", { name: /新建便签|New note/ }).first().click();
+const dialog = page.locator('[role="dialog"]');
+await dialog.waitFor({ timeout: 5000 });
+await dialog.locator("input.dsn-dialog-title").fill("项目周报");
+await dialog.locator("textarea.dsn-dialog-body").fill("本周完成：颜色、平铺、回收站。\n下周：导出。");
+await dialog.locator('.dsn-swatch[data-color="mint"]').click();
+await dialog.getByRole("button", { name: /置顶|^Pin$/ }).first().click();
+await page.waitForTimeout(1500);
+checks.saveState = await dialog.locator(".dsn-save").getAttribute("data-state");
+checks.saveText = (await dialog.locator(".dsn-save").innerText()).trim();
+await page.keyboard.press("Escape");
+await page.waitForTimeout(700);
 
-// Opening the sidebar can surface another fresh-profile hint; clear it before
-// driving the panel itself.
-await dismissOverlays(page);
+const mintCard = page.locator('.dsn-card[data-color="mint"]').first();
+checks.cardColor = await mintCard.getAttribute("data-color");
+checks.cardPinned = await mintCard.getAttribute("data-pinned");
+checks.cardTitle = (await mintCard.locator(".dsn-card-title").innerText()).trim();
 
-// Create a note through the panel, then wait past the debounce window.
-const newNote = page.getByRole("button", { name: /新建便签|New note/i }).first();
-if (!(await newNote.count())) throw new Error("the new-note button is missing");
-await newNote.click({ timeout: 5000 });
-await page.waitForTimeout(600);
-
-const titleInput = panel.locator("input.dsn-editor-title");
-const bodyInput = panel.locator("textarea.dsn-editor-body");
-if (!(await titleInput.count()) || !(await bodyInput.count())) throw new Error("the editor inputs are missing");
-
-const marker = `e2e-${Date.now().toString(36)}`;
-await titleInput.fill(`便签端到端 ${marker}`);
-await bodyInput.fill("从面板写入的第一段。\n第二行用来确认换行。");
-await page.waitForTimeout(1600);
-
-const saveState = await panel.locator(".dsn-save").getAttribute("data-state");
-const saveText = (await panel.locator(".dsn-save").innerText()).trim();
-const listTitles = await panel.locator(".dsn-card-title").allInnerTexts();
-await page.screenshot({ path: join(outDir, "03-saved.png") });
-console.log(`save: state=${saveState} text=${saveText} titles=${JSON.stringify(listTitles)}`);
-
-// Reload: the note must come back from the host, not from local component state.
+// 2. Seed two more colours straight through the route, so the board has variety.
+await page.evaluate(async () => {
+  const payloads = [
+    { title: "买点东西", body: "牛奶、鸡蛋、面包。", color: "amber" },
+    { title: "灵感", body: "把便签做成可以平铺的便签墙。", color: "sky" },
+    { title: "待办", body: "- 回复邮件\n- 续费域名", color: "rose", pinned: false }
+  ];
+  for (const payload of payloads) {
+    await fetch("/api/dsh-notes", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "create", ...payload })
+    });
+  }
+});
 await page.reload({ waitUntil: "domcontentloaded" });
 await page.waitForTimeout(5000);
-await dismissOverlays(page);
-const entryAfter = page.locator("button", { has: page.locator("svg") });
-const buttonsAfter = page.locator("button");
-let clicked = false;
-for (let index = 0; index < (await buttonsAfter.count()); index += 1) {
-  const aria = (await buttonsAfter.nth(index).getAttribute("aria-label").catch(() => "")) ?? "";
-  if (/便签|Notes/i.test(aria)) {
-    await buttonsAfter.nth(index).click({ timeout: 5000 });
-    clicked = true;
-    break;
-  }
-}
-if (!clicked) throw new Error("the sidebar entry disappeared after reload");
-await page.waitForTimeout(1200);
-const titlesAfter = await page.locator("[data-dsh-sticky-notes] .dsn-card-title").allInnerTexts();
-const bodyAfter = await page.locator("[data-dsh-sticky-notes] textarea").inputValue().catch(() => "");
-await page.screenshot({ path: join(outDir, "04-after-reload.png") });
-console.log(`after reload: titles=${JSON.stringify(titlesAfter)} body=${JSON.stringify(bodyAfter)}`);
+await dismissOverlays();
+await openBoard();
+checks.cardCount = await board.locator(".dsn-card").count();
+await page.screenshot({ path: join(outDir, "11-board.png") });
 
+// 3. Grid density: "3 per row" must produce exactly three tracks.
+await page.locator('select[aria-label="每行"], select[aria-label="Per row"]').selectOption("3");
+await page.waitForTimeout(400);
+checks.density = await board.locator(".dsn-board").getAttribute("data-density");
+checks.columns = await board.locator(".dsn-board").evaluate((element) => {
+  const template = getComputedStyle(element).gridTemplateColumns;
+  return template.split(" ").filter((track) => track !== "").length;
+});
+await page.screenshot({ path: join(outDir, "12-grid-3.png") });
+
+// 4. Search narrows the board and the empty state speaks.
+await page.locator(".dsn-search").fill("周报");
+await page.waitForTimeout(300);
+checks.searchTitles = await board.locator(".dsn-card-title").allInnerTexts();
+await page.locator(".dsn-search").fill("zzz-no-such-note");
+await page.waitForTimeout(300);
+checks.emptyText = (await board.locator(".dsn-empty").innerText()).trim();
+await page.locator(".dsn-search").fill("");
+await page.waitForTimeout(300);
+
+// 5. Archive through the card action, look in the trash, restore.
+const target = page.locator(".dsn-card", { hasText: "买点东西" }).first();
+await target.hover();
+await target.locator('button[aria-label="移到回收站"], button[aria-label="Move to trash"]').click();
+await page.waitForTimeout(900);
+checks.toast = (await page.locator(".dsn-toast").innerText().catch(() => "")).trim();
+checks.afterArchive = await board.locator(".dsn-card").count();
+
+await page.getByRole("tab", { name: /回收站|Trash/ }).click();
+await page.waitForTimeout(500);
+checks.trashCards = await board.locator(".dsn-card").count();
+await page.screenshot({ path: join(outDir, "13-trash.png") });
+await board.locator('.dsn-card button[aria-label="恢复"], .dsn-card button[aria-label="Restore"]').first().click();
+await page.waitForTimeout(700);
+checks.trashAfterRestore = await board.locator(".dsn-card").count();
+await page.getByRole("tab", { name: /全部|^All/ }).click();
+await page.waitForTimeout(500);
+checks.allAfterRestore = await board.locator(".dsn-card").count();
+
+// 6. Reload: colour, pin and content come back from the host store.
+await page.reload({ waitUntil: "domcontentloaded" });
+await page.waitForTimeout(5000);
+await dismissOverlays();
+await openBoard();
+checks.afterReloadTitles = await board.locator(".dsn-card-title").allInnerTexts();
+checks.afterReloadPinned = await page.locator('.dsn-card[data-color="mint"]').first().getAttribute("data-pinned");
+await page.screenshot({ path: join(outDir, "14-after-reload.png") });
+
+const scopedErrors = errors.filter((entry) => /sticky-notes|dsn-/.test(entry));
 const result = {
-  entryFound: true,
-  panel: { count: panelCount, box: panelBox, paint },
-  save: { state: saveState, text: saveText },
-  persisted: {
-    titleSurvived: titlesAfter.some((title) => title.includes(marker)),
-    bodySurvived: bodyAfter.includes(marker) || bodyAfter.includes("第一段")
-  },
-  errors: errors.filter((entry) => /dsh-sticky-notes|dsn-|sticky-notes/.test(entry)),
-  ambientErrors: errors.filter((entry) => !/dsh-sticky-notes|dsn-|sticky-notes/.test(entry))
+  checks,
+  errors: scopedErrors,
+  ambientErrors: errors.filter((entry) => !/sticky-notes|dsn-/.test(entry))
 };
 await writeFile(join(outDir, "result.json"), JSON.stringify(result, null, 2), "utf8");
 console.log(`result: ${JSON.stringify(result)}`);
 
+const failed = [];
+if (checks.saveState !== "saved") failed.push("auto-save did not reach saved");
+if (checks.cardColor !== "mint") failed.push("the card lost its colour");
+if (checks.cardPinned !== "true") failed.push("the card lost its pin");
+if (checks.cardCount !== 4) failed.push(`expected 4 seeded cards, saw ${checks.cardCount}`);
+if (checks.density !== "3") failed.push("density select did not apply");
+if (checks.columns !== 3) failed.push(`grid has ${checks.columns} tracks, expected 3`);
+if (!checks.searchTitles.includes("项目周报") || checks.searchTitles.length !== 1) failed.push("search did not narrow to one card");
+if (!checks.emptyText.includes("没有") && !checks.emptyText.includes("No note")) failed.push("the filtered empty state is missing");
+if (checks.afterArchive !== 3) failed.push(`archive left ${checks.afterArchive} cards, expected 3`);
+if (checks.trashCards !== 1) failed.push(`trash shows ${checks.trashCards} cards, expected 1`);
+if (checks.allAfterRestore !== 4) failed.push(`restore left ${checks.allAfterRestore} cards, expected 4`);
+if (!checks.afterReloadTitles.includes("项目周报")) failed.push("the note did not survive a reload");
+if (checks.afterReloadPinned !== "true") failed.push("the pin did not survive a reload");
+if (scopedErrors.length > 0) failed.push(`plugin console errors: ${scopedErrors.join(" | ")}`);
+
 await browser.close();
-if (result.errors.length > 0) process.exitCode = 1;
-if (!result.persisted.titleSurvived || !result.persisted.bodySurvived) process.exitCode = 1;
+if (failed.length > 0) {
+  console.error(`FAILED: ${failed.join("; ")}`);
+  process.exitCode = 1;
+}

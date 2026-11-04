@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Sticky Notes",
-    "description": "A notes panel in the sidebar: jot a note, it saves itself. The assistant reads and writes the same notes through the note_* tools."
+    "description": "A tiled notes board in the sidebar: colours, pins, search and colour filters, a trash with restore, Markdown export, and note_* tools that read and write the same notes."
   },
   "panel": {
     "title": "Notes"
