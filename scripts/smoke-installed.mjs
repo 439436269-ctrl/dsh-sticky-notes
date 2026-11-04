@@ -70,6 +70,10 @@ const panel = page.locator("[data-dsh-sticky-notes]");
 const panelCount = await panel.count();
 if (panelCount !== 1) throw new Error("the notes panel did not mount");
 
+// The board build must expose its density control and the seven colour swatches.
+const density = await panel.locator('select[aria-label="每行"], select[aria-label="Per row"]').count();
+const swatches = await panel.locator(".dsn-colors .dsn-swatch").count();
+
 const api = await page.evaluate(async () => {
   const response = await fetch("/api/dsh-notes", { headers: { accept: "application/json" }, cache: "no-store" });
   const body = await response.json().catch(() => null);
@@ -77,7 +81,8 @@ const api = await page.evaluate(async () => {
 });
 
 const scoped = errors.filter((entry) => /sticky-notes|dsn-/.test(entry));
-const result = { entries, panelCount, api, errors: scoped };
+const result = { entries, panelCount, density, swatches, api, errors: scoped };
 console.log(`result: ${JSON.stringify(result)}`);
 await browser.close();
 if (!api.ok || scoped.length > 0) process.exitCode = 1;
+if (density !== 1 || swatches !== 7) process.exitCode = 1;
