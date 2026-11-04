@@ -1,0 +1,13 @@
+# dsh-sticky-notes bundle patch: one plugin row.
+#
+# The row mounts the package's main entry as the host half (a plain Cordis
+# plugin that owns the notes storage domain, the authenticated /api route, and
+# the four note_* tools). The `dsh.client` declaration in package.json makes
+# the web app load `./client` as the browser half, which draws the sidebar
+# entry and the notes panel.
+#
+# The row id is also the settings-page namespace; this plugin has no
+# configuration of its own, so the row carries no `config` block.
+- insert:
+    - id: sticky-notes
+      name: '@vfvrpq/dsh-sticky-notes'

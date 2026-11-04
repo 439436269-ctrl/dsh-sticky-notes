@@ -1,0 +1,72 @@
+{
+  "name": "@vfvrpq/dsh-sticky-notes",
+  "version": "0.1.0",
+  "description": "Sticky notes in the Harness sidebar: a dedicated notes panel with auto-save, plus note_list / note_create / note_update / note_delete tools so the assistant can jot things down for you.",
+  "type": "module",
+  "license": "MIT",
+  "author": "439436269-ctrl",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "notes",
+    "sticky-notes",
+    "sidebar",
+    "便签"
+  ],
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "lib/**/*.js",
+    "locale/*.json",
+    "icon.svg",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-storage-domain": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-tools": "^0.2.0-rc.2"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    },
+    "compatibility": {
+      "dshReleases": {
+        "0.2.0-rc.2": "compatible"
+      }
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/439436269-ctrl/dsh-sticky-notes.git"
+  },
+  "homepage": "https://github.com/439436269-ctrl/dsh-sticky-notes#readme",
+  "bugs": {
+    "url": "https://github.com/439436269-ctrl/dsh-sticky-notes/issues"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}

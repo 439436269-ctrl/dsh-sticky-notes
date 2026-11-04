@@ -1,0 +1,9 @@
+{
+  "meta": {
+    "title": "Sticky Notes",
+    "description": "A notes panel in the sidebar: jot a note, it saves itself. The assistant reads and writes the same notes through the note_* tools."
+  },
+  "panel": {
+    "title": "Notes"
+  }
+}
