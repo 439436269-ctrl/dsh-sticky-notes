@@ -119,12 +119,22 @@ text in a dark run.
   (order 40, active) among `sidebar.panellist` occupants and `sticky-notes` among `main`
   occupants, i.e. the browser half registered in the real window's plugin graph.
 
+## Market listing (merged 2026-11-05)
+
+- `awesome-dsh-plugin` PR **#12136** — merged at `2026-11-05T17:24:23Z`, one file `+6/-0`,
+  no review comments, both required checks green (`check`, `Submission gate`).
+- The entry lives at `data/plugins/439436269-ctrl__dsh-sticky-notes.yml` on `main`
+  (404 before the merge, fetchable afterwards — that is the inclusion check, not a directory listing).
+- Timeline, for planning the next submission: repo created `2026-11-04T00:06Z`; the script ran
+  `2026-11-05T00:30Z` (24.4 h old, just past the one-day gate); `check` sat in the queue ~17 min
+  and `Submission gate` (triggered by `check`) took ~20 min more; merged the same day with no review.
+
 ## Not verified here
 
-- Community-directory submission (`awesome-dsh-plugin`): its gate requires the repository to be
-  at least 1 day old, and this one was created on 2026-11-04, so the PR is opened on or after
-  2026-11-05. The entry text is prepared (`category: ui`).
 - The user's own window after an upgrade: the browser half is served per page load, so an open
   tab keeps the previous bundle until it is refreshed.
 - The unscoped name `dsh-sticky-notes` is taken on npm by an unrelated plugin
   (`zmm863-commits/dsh-sticky-notes@1.0.3`), which is why this package ships scoped.
+- The repository's generated `README.md` (3.2 MB, maintainer-side) was not fetched after the merge,
+  so the rendered table line is unverified; the authoritative entry file on `main` is.
+
