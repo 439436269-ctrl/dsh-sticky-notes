@@ -1,6 +1,6 @@
 {
   "name": "@vfvrpq/dsh-sticky-notes",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Colour-coded sticky notes on the Harness sidebar: a tiled board with per-row density, pin, search, colour filters, a trash with restore, Markdown export, and note_* tools that read and write the same notes.",
   "type": "module",
   "license": "MIT",
@@ -37,8 +37,8 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-storage-domain": "^0.2.0-rc.2",
-    "@deepseek-ai/dsh-tools": "^0.2.0-rc.2"
+    "@deepseek-ai/dsh-storage-domain": "^0.2.0-rc.2 || ^0.2.1-rc.1 || ^0.2.2-rc.1",
+    "@deepseek-ai/dsh-tools": "^0.2.0-rc.2 || ^0.2.1-rc.1 || ^0.2.2-rc.1"
   },
   "dsh": {
     "bundle": {
@@ -50,7 +50,9 @@
     },
     "compatibility": {
       "dshReleases": {
-        "0.2.0-rc.2": "compatible"
+        "0.2.0-rc.2": "compatible",
+        "0.2.1-rc.2": "compatible",
+        "0.2.2-rc.1": "compatible"
       }
     }
   },
